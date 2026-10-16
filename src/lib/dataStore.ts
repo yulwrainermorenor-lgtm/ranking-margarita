@@ -312,11 +312,14 @@ export type ScoreDrift = {
   diff: number;
 };
 
+export type TrueInitial = { playerId: string; name: string; initial: number; wonPoints: number; suggested: number };
+
 export type DriftReport = {
   drift: ScoreDrift[];
   matchesChanged: number;
   playersInLog: number;
   maxDiff: number;
+  trueInitials: TrueInitial[];
 };
 
 /**
@@ -328,9 +331,9 @@ export function computeScoreDrift(): DriftReport {
   const matches = loadMatches();
   const replay = replayMatchLog(matches, players);
 
-  const byId = new Map(players.map((p) => [p.id, p]));
   const drift: ScoreDrift[] = [];
 
+  const byId = new Map(players.map((p) => [p.id, p]));
   for (const [playerId, expected] of replay.scores) {
     const player = byId.get(playerId);
     if (!player) continue;
@@ -339,6 +342,31 @@ export function computeScoreDrift(): DriftReport {
       drift.push({ playerId, name: player.name, stored: player.score, expected, diff });
     }
   }
+
+  const wonPointsByPlayer = new Map<string, number>();
+  for (const m of matches) {
+    const p = byId.get(m.winner_id);
+    if (!p) continue;
+    if (p.initial_score !== 1500) continue;
+    if (!wonPointsByPlayer.has(m.winner_id)) wonPointsByPlayer.set(m.winner_id, 0);
+    wonPointsByPlayer.set(m.winner_id, (wonPointsByPlayer.get(m.winner_id) ?? 0) + (m.points_exchanged ?? 0));
+  }
+
+  const trueInitials: TrueInitial[] = [];
+  for (const [playerId, wonPoints] of wonPointsByPlayer) {
+    const player = byId.get(playerId);
+    if (!player) continue;
+    if (wonPoints > 0) {
+      trueInitials.push({
+        playerId,
+        name: player.name,
+        initial: 1500,
+        wonPoints,
+        suggested: player.score - wonPoints,
+      });
+    }
+  }
+  trueInitials.sort((a, b) => b.wonPoints - a.wonPoints);
 
   drift.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
 
@@ -360,6 +388,7 @@ export function computeScoreDrift(): DriftReport {
     matchesChanged,
     playersInLog: replay.scores.size,
     maxDiff: drift.reduce((max, d) => Math.max(max, Math.abs(d.diff)), 0),
+    trueInitials,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   computeScoreDrift,
   repairScoresFromLog,
   type DriftReport,
+  type TrueInitial,
 } from "@/lib/dataStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -354,6 +355,20 @@ export default function VerifyPoints() {
         )}
       </div>
 
+       {!report.drift.length && report.trueInitials?.length ? null : (
+        report.trueInitials && report.trueInitials.length > 0 ? (
+         <div className="overflow-x-auto rounded-xl border border-white/10 bg-zinc-950">
+           <div className="px-4 py-2 text-white font-bold text-xs uppercase border-b border-white/10">Puntaje inicial verdadero (initial_score 1500)</div>
+           <table className="w-full text-xs font-mono">
+             <thead><tr className="text-zinc-400 border-b border-white/10 bg-zinc-900 uppercase"><th className="py-2 px-4">Atleta</th><th className="py-2 px-4 text-right">Inicial</th><th className="py-2 px-4 text-right">Pts ganados</th><th className="py-2 px-4 text-right">Verdadero</th></tr></thead>
+             <tbody className="divide-y divide-white/5">
+               {report.trueInitials.map((t: TrueInitial) => (
+                 <tr key={t.playerId}><td className="py-2 px-4 text-white">{t.name}</td><td className="py-2 px-4 text-right">{t.initial}</td><td className="py-2 px-4 text-right">+{t.wonPoints}</td><td className="py-2 px-4 text-right font-bold text-red-400">{t.suggested}</td></tr>
+               ))}
+             </tbody>
+           </table>
+         </div>
+       ) : null)}
       {/* Official Rule Table */}
       <div className="rounded-2xl border border-white/10 bg-zinc-900/80 p-6 space-y-4">
         <div className="flex items-center gap-2 text-white font-bold text-base">
