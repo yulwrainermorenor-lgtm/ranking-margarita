@@ -6,11 +6,12 @@ const DEFAULT_ADMIN_EMAILS = [
   "feteneme@gmail.com",
   "admin@tenisdemesamargarita.com",
   "margaritatt@gmail.com",
+  "yulwrainermorenor@gmail.com",
+  "atemene01@gmail.com",
 ];
 
 const ADMIN_STORAGE_KEY = "ranking_margarita_admin_email_v2";
 const ADMIN_EMAILS_KEY = "ranking_margarita_admin_emails_v3";
-const MASTER_PIN = "1234"; // fallback PIN for any valid admin
 
 interface AuthCtx {
   user: { email: string } | null;
@@ -74,20 +75,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loginAsAdmin = (emailInput: string, pinInput?: string): boolean => {
+  const loginAsAdmin = (emailInput: string): boolean => {
     const cleanEmail = emailInput.trim().toLowerCase();
     const currentEmails = loadAdminEmails();
     const isAllowedEmail = currentEmails.some((e) => e.toLowerCase() === cleanEmail);
-    const isValidPin = pinInput === MASTER_PIN || pinInput === "admin";
 
-    if (isAllowedEmail || isValidPin || cleanEmail.includes("admin")) {
-      const activeEmail = isAllowedEmail ? cleanEmail : "admin@rankingmargarita.com";
-      localStorage.setItem(ADMIN_STORAGE_KEY, activeEmail);
-      setAdminEmail(activeEmail);
-      return true;
+    if (!isAllowedEmail) {
+      return false;
     }
 
-    return false;
+    localStorage.setItem(ADMIN_STORAGE_KEY, cleanEmail);
+    setAdminEmail(cleanEmail);
+    return true;
   };
 
   const signOut = () => {

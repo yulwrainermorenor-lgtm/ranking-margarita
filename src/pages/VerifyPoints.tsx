@@ -3,6 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Player } from "@/lib/types";
 import { POINTS_TABLE, pointsForMatch } from "@/lib/points";
+import {
+  computeScoreDrift,
+  repairScoresFromLog,
+  type DriftReport,
+} from "@/lib/dataStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -108,6 +113,7 @@ export default function VerifyPoints() {
   const [loserSets, setLoserSets] = useState(0);
   const [playedAt, setPlayedAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [result, setResult] = useState<Result | null>(null);
+  const [report, setReport] = useState<DriftReport | null>(null);
 
   const winner = players.find((p) => p.id === winnerId);
   const loser = players.find((p) => p.id === loserId);
@@ -233,6 +239,120 @@ export default function VerifyPoints() {
           </div>
         </div>
       )}
+
+      {/* Auditoría del historial: el log debe explicar todos los puntajes */}
+      <div className="rounded-2xl border border-white/10 bg-zinc-900/80 p-6 space-y-4">
+        <div className="flex items-center gap-2 text-white font-bold text-base">
+          <ShieldCheck className="h-5 w-5 text-red-500" /> Auditoría del historial
+        </div>
+        <p className="text-xs text-zinc-400">
+          Rehace todos los partidos en orden de fecha y compara el puntaje guardado con el
+          que debería tener cada atleta. Si hay diferencias, se pueden recalcular.
+        </p>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 border-white/15 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 text-xs rounded-xl font-medium"
+            onClick={() => {
+              const r = computeScoreDrift();
+              setReport(r);
+              if (r.drift.length === 0 && r.matchesChanged === 0) {
+                toast.success(`Historial coherente: ${r.playersInLog} atletas y sus partidos cuadran`);
+              } else {
+                toast.warning(
+                  `${r.drift.length} atletas con diferencias (máx. ${r.maxDiff} pts) y ${r.matchesChanged} partidos inconsistentes`,
+                );
+              }
+            }}
+          >
+            Analizar historial
+          </Button>
+
+          {report && (report.drift.length > 0 || report.matchesChanged > 0) && (
+            <Button
+              size="sm"
+              className="h-9 bg-red-600 hover:bg-red-500 text-white text-xs rounded-xl font-bold shadow-glow-red"
+              onClick={() => {
+                const ok = window.confirm(
+                  `Se van a recalcular ${report.drift.length} atletas y reescribir ${report.matchesChanged} partidos del historial. ¿Continuar?`,
+                );
+                if (!ok) return;
+                const applied = repairScoresFromLog();
+                setReport(computeScoreDrift());
+                qc.invalidateQueries();
+                toast.success(
+                  `Recalculado: ${applied.playersFixed} atletas y ${applied.matchesFixed} partidos corregidos`,
+                );
+              }}
+            >
+              Recalcular puntajes
+            </Button>
+          )}
+        </div>
+
+        {report && (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-white/10 bg-zinc-950 p-4 text-xs font-mono space-y-1.5">
+              <div className="flex justify-between text-zinc-400">
+                <span>Atletas en el historial:</span>
+                <span className="text-white font-bold">{report.playersInLog}</span>
+              </div>
+              <div className="flex justify-between text-zinc-400">
+                <span>Atletas con puntaje distinto al recalculado:</span>
+                <span className={report.drift.length ? "text-red-400 font-bold" : "text-emerald-400 font-bold"}>
+                  {report.drift.length}
+                </span>
+              </div>
+              <div className="flex justify-between text-zinc-400">
+                <span>Partidos con datos inconsistentes:</span>
+                <span className={report.matchesChanged ? "text-red-400 font-bold" : "text-emerald-400 font-bold"}>
+                  {report.matchesChanged}
+                </span>
+              </div>
+              {report.drift.length > 0 && (
+                <div className="flex justify-between text-zinc-400">
+                  <span>Diferencia máxima:</span>
+                  <span className="text-white font-bold">{report.maxDiff} pts</span>
+                </div>
+              )}
+            </div>
+
+            {report.drift.length > 0 && (
+              <div className="overflow-x-auto rounded-xl border border-white/10 bg-zinc-950">
+                <table className="w-full text-xs font-mono">
+                  <thead>
+                    <tr className="text-left text-zinc-400 border-b border-white/10 bg-zinc-900 uppercase">
+                      <th className="py-2 px-4 font-bold">Atleta</th>
+                      <th className="py-2 px-4 font-bold text-right">Guardado</th>
+                      <th className="py-2 px-4 font-bold text-right">Según historial</th>
+                      <th className="py-2 px-4 font-bold text-right">Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-zinc-200">
+                    {report.drift.slice(0, 20).map((d) => (
+                      <tr key={d.playerId}>
+                        <td className="py-2 px-4 text-white">{d.name}</td>
+                        <td className="py-2 px-4 text-right">{d.stored}</td>
+                        <td className="py-2 px-4 text-right">{d.expected}</td>
+                        <td className={`py-2 px-4 text-right font-bold ${d.diff > 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {d.diff > 0 ? `+${d.diff}` : d.diff}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {report.drift.length > 20 && (
+                  <div className="px-4 py-2 text-[11px] text-zinc-500 border-t border-white/10">
+                    Se muestran los 20 atletas con mayor diferencia de {report.drift.length}.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Official Rule Table */}
       <div className="rounded-2xl border border-white/10 bg-zinc-900/80 p-6 space-y-4">

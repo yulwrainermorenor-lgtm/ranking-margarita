@@ -15,6 +15,16 @@ import {
 } from "@/lib/dataStore";
 import { Player, Match, Tournament, TournamentMatch, TournamentParticipant } from "@/lib/types";
 
+/**
+ * Sets de un lado del partido. Un 0 válido debe seguir siendo 0:
+ * `Number(v || 3)` convertía un 0-0 en 3-0 sin avisar.
+ */
+function toSets(value: unknown, fallback: number): number {
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : fallback;
+}
+
 function getSourceData(tableName: string): any[] {
   if (tableName === "players") return loadPlayers();
   if (tableName === "matches") return loadMatches();
@@ -340,8 +350,8 @@ export const supabase = {
           const res = createMatchRecord(
             winner_id,
             loser_id,
-            Number(winner_sets || 3),
-            Number(loser_sets || 0),
+            toSets(winner_sets, 3),
+            toSets(loser_sets, 0),
             played_at
           );
           return {
@@ -374,8 +384,8 @@ export const supabase = {
             match_id,
             winner_id,
             loser_id,
-            Number(winner_sets || 3),
-            Number(loser_sets || 0),
+            toSets(winner_sets, 3),
+            toSets(loser_sets, 0),
             played_at
           );
           return {

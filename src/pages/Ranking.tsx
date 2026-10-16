@@ -136,15 +136,17 @@ export default function Ranking() {
             <span>Exportar</span>
           </Button>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleReset}
-            className="h-8 w-8 text-zinc-500 hover:text-white rounded-lg"
-            title="Restablecer datos originales"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
+          {isAdmin && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleReset}
+              className="h-8 w-8 text-zinc-500 hover:text-white rounded-lg"
+              title="Restablecer datos originales"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       </div>
 

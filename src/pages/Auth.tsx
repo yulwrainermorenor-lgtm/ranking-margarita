@@ -1,6 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,25 +8,17 @@ import { toast } from "sonner";
 
 export default function Auth() {
   const navigate = useNavigate();
-  const { user, loading } = useAuth();
+  const { loginAsAdmin } = useAuth();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!loading && user) navigate("/", { replace: true });
-  }, [user, loading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setSubmitting(false);
-    if (error) {
-      toast.error(error.message);
+    const ok = loginAsAdmin(email);
+    if (!ok) {
+      toast.error("Correo no autorizado como administrador");
       return;
     }
-    toast.success("¡Bienvenido!");
+    toast.success("Sesión de administrador iniciada");
     navigate("/", { replace: true });
   };
 
@@ -58,21 +49,7 @@ export default function Auth() {
               required
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Contraseña</Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          <Button type="submit" className="w-full" disabled={submitting}>
-            {submitting ? "Ingresando..." : "Ingresar"}
-          </Button>
-        </form>
+          <Button type="submit" className="w-full">Ingresar</Button>        </form>
 
         <button
           onClick={() => navigate("/")}

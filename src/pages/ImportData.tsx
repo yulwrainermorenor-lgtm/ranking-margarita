@@ -3,23 +3,21 @@ import * as XLSX from "xlsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import {
+  MATCH_COLS,
+  PLAYER_COLS,
+  matchKey,
+  norm,
+  parseMatchRows,
+  parsePlayerRows,
+  validateMatchRow,
+} from "@/lib/excelImport";
+import { loadMatches } from "@/lib/dataStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download, Upload, FileSpreadsheet, Sparkles, CheckCircle, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-
-const norm = (s: string) =>
-  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-
-const PLAYER_COLS = ["nombre", "club", "puntaje", "puntaje_inicial", "activo"];
-const MATCH_COLS = [
-  "fecha",
-  "ganador",
-  "perdedor",
-  "sets_ganador",
-  "sets_perdedor",
-];
 
 function downloadTemplate(kind: "jugadores" | "partidos") {
   const rows =
@@ -54,22 +52,6 @@ async function readSheet(file: File): Promise<Record<string, unknown>[]> {
     return out;
   });
 }
-
-const toDate = (v: unknown): string | undefined => {
-  if (!v) return undefined;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
-  const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-  return undefined;
-};
-
-const truthy = (v: unknown) => {
-  const s = norm(String(v ?? ""));
-  if (!s) return true;
-  return ["si", "sí", "true", "1", "activo", "x", "yes"].includes(s);
-};
 
 export default function ImportData() {
   const { isAdmin } = useAuth();
@@ -108,44 +90,36 @@ export default function ImportData() {
     const lines: string[] = [];
     try {
       const rows = await readSheet(file);
+      const parsed = parsePlayerRows(rows);
       let inserted = 0;
       let updated = 0;
-      for (const [i, r] of rows.entries()) {
-        const name = String(r["nombre"] ?? "").trim();
-        if (!name) continue;
-        const club = String(r["club"] ?? "").trim() || null;
-        const score = Number(r["puntaje"]);
-        const initial = Number(r["puntaje_inicial"]);
-        const is_active = truthy(r["activo"]);
-        const existing = byName.get(norm(name));
+      for (const r of parsed) {
+        const existing = byName.get(norm(r.name));
         const payload: {
           club: string | null;
           is_active: boolean;
           score?: number;
           initial_score?: number;
-        } = { club, is_active };
-        if (Number.isFinite(score)) payload.score = score;
-        if (Number.isFinite(initial)) payload.initial_score = initial;
+        } = { club: r.club, is_active: r.isActive };
+        // solo se pisa el puntaje si la planilla trae un número real
+        if (r.score !== null) payload.score = r.score;
+        if (r.initialScore !== null) payload.initial_score = r.initialScore;
         if (existing) {
           const { error } = await supabase
             .from("players")
             .update(payload)
             .eq("id", existing.id);
-          if (error) lines.push(`Fila ${i + 2} (${name}): ${error.message}`);
+          if (error) lines.push(`Fila ${r.rowNumber} (${r.name}): ${error.message}`);
           else updated++;
         } else {
           const { error } = await supabase.from("players").insert({
-            name,
-            club,
-            is_active,
-            score: Number.isFinite(score) ? score : 1500,
-            initial_score: Number.isFinite(initial)
-              ? initial
-              : Number.isFinite(score)
-                ? score
-                : 1500,
+            name: r.name,
+            club: r.club,
+            is_active: r.isActive,
+            score: r.score ?? 1500,
+            initial_score: r.initialScore ?? r.score ?? 1500,
           });
-          if (error) lines.push(`Fila ${i + 2} (${name}): ${error.message}`);
+          if (error) lines.push(`Fila ${r.rowNumber} (${r.name}): ${error.message}`);
           else inserted++;
         }
       }
@@ -167,42 +141,63 @@ export default function ImportData() {
     const lines: string[] = [];
     try {
       const rows = await readSheet(file);
+      const parsed = parseMatchRows(rows);
       const { data: fresh } = await supabase.from("players").select("id, name");
       const map = new Map<string, string>();
       (fresh ?? []).forEach((p) => map.set(norm(p.name), p.id));
 
+      // Los partidos ya cargados no se vuelven a aplicar: subir dos veces la misma
+      // planilla duplicaba el historial y sumaba los puntos otra vez.
+      const alreadyLoaded = new Set(
+        loadMatches().map((m) => matchKey(m.winner_id, m.loser_id, m.played_at)),
+      );
+
+      // El puntaje de un partido depende del puntaje del momento, así que hay que
+      // cargarlos en orden de fecha y no en el orden en que vengan en el archivo.
+      const ordered = [...parsed].sort((a, b) =>
+        String(a.playedAt ?? "").localeCompare(String(b.playedAt ?? "")),
+      );
+
       let ok = 0;
-      for (const [i, r] of rows.entries()) {
-        const w = String(r["ganador"] ?? "").trim();
-        const l = String(r["perdedor"] ?? "").trim();
-        if (!w && !l) continue;
-        const wid = map.get(norm(w));
-        const lid = map.get(norm(l));
+      for (const r of ordered) {
+        const invalid = validateMatchRow(r);
+        if (invalid) {
+          lines.push(`Fila ${r.rowNumber}: ${invalid}`);
+          continue;
+        }
+        const wid = map.get(norm(r.winnerName));
+        const lid = map.get(norm(r.loserName));
         if (!wid || !lid) {
           lines.push(
-            `Fila ${i + 2}: jugador no encontrado (${!wid ? w : l})`,
+            `Fila ${r.rowNumber}: jugador no encontrado (${!wid ? r.winnerName : r.loserName})`,
           );
           continue;
         }
-        const ws = Number(r["sets_ganador"] ?? 3);
-        const ls = Number(r["sets_perdedor"] ?? 0);
+        const key = matchKey(wid, lid, r.playedAt!);
+        if (alreadyLoaded.has(key)) {
+          lines.push(`Fila ${r.rowNumber}: partido ya cargado (${r.playedAt})`);
+          continue;
+        }
         const { data, error } = await supabase.functions.invoke(
           "record-match",
           {
             body: {
               winner_id: wid,
               loser_id: lid,
-              winner_sets: Number.isFinite(ws) ? ws : 3,
-              loser_sets: Number.isFinite(ls) ? ls : 0,
-              played_at: toDate(r["fecha"]),
+              winner_sets: r.winnerSets,
+              loser_sets: r.loserSets,
+              played_at: r.playedAt,
             },
           },
         );
         const errMsg =
           (data as { error?: unknown } | null)?.error ?? error?.message;
         if (errMsg) {
-          lines.push(`Fila ${i + 2}: ${JSON.stringify(errMsg)}`);
-        } else ok++;
+          lines.push(`Fila ${r.rowNumber}: ${JSON.stringify(errMsg)}`);
+        } else {
+          alreadyLoaded.add(key);
+          ok++;
+        }
       }
       lines.unshift(`Partidos cargados: ${ok} de ${rows.length}`);
       toast.success(`${ok} partidos cargados`);
