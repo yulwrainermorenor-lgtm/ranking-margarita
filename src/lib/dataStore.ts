@@ -356,15 +356,13 @@ export function computeScoreDrift(): DriftReport {
   for (const [playerId, wonPoints] of wonPointsByPlayer) {
     const player = byId.get(playerId);
     if (!player) continue;
-    if (wonPoints > 0) {
-      trueInitials.push({
-        playerId,
-        name: player.name,
-        initial: 1500,
-        wonPoints,
-        suggested: player.score - wonPoints,
-      });
-    }
+    trueInitials.push({
+      playerId,
+      name: player.name,
+      initial: 1500,
+      wonPoints,
+      suggested: player.score - wonPoints,
+    });
   }
   trueInitials.sort((a, b) => b.wonPoints - a.wonPoints);
 
