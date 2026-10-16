@@ -343,28 +343,35 @@ export function computeScoreDrift(): DriftReport {
     }
   }
 
-  const wonPointsByPlayer = new Map<string, number>();
+  const gains = new Map<string, number>();
+  const losses = new Map<string, number>();
   for (const m of matches) {
-    const p = byId.get(m.winner_id);
-    if (!p) continue;
-    if (p.initial_score !== 1500) continue;
-    if (!wonPointsByPlayer.has(m.winner_id)) wonPointsByPlayer.set(m.winner_id, 0);
-    wonPointsByPlayer.set(m.winner_id, (wonPointsByPlayer.get(m.winner_id) ?? 0) + (m.points_exchanged ?? 0));
+    const w = byId.get(m.winner_id);
+    const l = byId.get(m.loser_id);
+    if (!w && !l) continue;
+    if (w) {
+      gains.set(w.id, (gains.get(w.id) ?? 0) + (m.points_exchanged ?? 0));
+    }
+    if (l) {
+      losses.set(l.id, (losses.get(l.id) ?? 0) + (m.points_exchanged ?? 0));
+    }
   }
 
   const trueInitials: TrueInitial[] = [];
-  for (const [playerId, wonPoints] of wonPointsByPlayer) {
-    const player = byId.get(playerId);
-    if (!player) continue;
+  for (const p of players) {
+    if (!gains.has(p.id) && !losses.has(p.id)) continue;
+    const wonPts = gains.get(p.id) ?? 0;
+    const lostPts = losses.get(p.id) ?? 0;
+    const suggested = p.score - wonPts + lostPts;
     trueInitials.push({
-      playerId,
-      name: player.name,
-      initial: 1500,
-      wonPoints,
-      suggested: player.score - wonPoints,
+      playerId: p.id,
+      name: p.name,
+      initial: p.initial_score ?? p.score,
+      wonPoints: wonPts,
+      suggested,
     });
   }
-  trueInitials.sort((a, b) => b.wonPoints - a.wonPoints);
+  trueInitials.sort((a, b) => Math.abs(b.suggested - (byId.get(b.playerId)?.initial_score ?? b.suggested)) - Math.abs(a.suggested - (byId.get(a.playerId)?.initial_score ?? a.suggested)));
 
   drift.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
 
